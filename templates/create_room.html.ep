@@ -1,0 +1,20 @@
+<script
+  src="https://code.jquery.com/jquery-3.4.1.min.js"
+  integrity="sha256-CSXorXvZcTkaix6Yvo6HppcZGetbYMGWSFlBw8HfCJo="
+  crossorigin="anonymous"></script>
+<a id="createRoom" href="#">create a new room</a>
+    <script>
+    function create_uuidv4() {
+	return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+	    var r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
+	    return v.toString(16);
+	});
+    }
+    $(function(){
+	$('#createRoom').on('click', e => {
+	    var uuid4 = create_uuidv4();
+	    console.log(uuid4);
+	    window.location = '<%= url_for('room/')->to_abs %>' + uuid4;
+	})
+    })
+</script>

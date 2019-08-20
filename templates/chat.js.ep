@@ -1,0 +1,69 @@
+paper.install(window);
+
+window.onload = function() {
+    paper.setup('canvas');
+
+    var path;
+    var tool = new Tool();
+
+    $.get('<%= url_for('messages')->to_abs %>', d => {
+	console.log(d);
+	d.forEach(p => {
+	    var path = Item.importJSON(p.event);
+	    path.addTo(paper.project);
+	})
+    })
+    
+    var messages = [];
+    var ws = new WebSocket('<%= url_for('channel')->to_abs %>');
+
+    ws.onmessage = function (e) {
+	console.log('e', e);
+	var d = JSON.parse(e.data)
+	var path = Item.importJSON(e.data);
+	path.addTo(paper.project);
+    };
+
+
+    var textItem = new PointText({
+	content: 'Click and drag to draw a line.',
+	point: new Point(20, 30),
+	fillColor: 'black',
+    });
+
+    tool.onMouseDown = function(event) {
+	if (path) {
+	    path.selected = false;
+	}
+
+	path = new Path({
+            segments: [event.point],
+            strokeColor: 'black',
+            fullySelected: false
+	});
+	
+    }
+
+    tool.onMouseDrag = function(event) {
+	path.add(event.point);
+    }
+
+    tool.onMouseUp = function(event) {
+	var segmentCount = path.segments.length;
+	
+	path.simplify(10);
+	path.fullySelected = false;
+	
+	var newSegmentCount = path.segments.length;
+	var difference = segmentCount - newSegmentCount;
+	var percentage = 100 - Math.round(newSegmentCount / segmentCount * 100);
+	
+	sendstuff(path);
+    }
+
+
+    function sendstuff(path) {
+	ws.send(JSON.stringify(path.toJSON()))
+    }
+
+}
