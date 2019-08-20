@@ -3,6 +3,11 @@ use Mojo::Pg;
 
 helper pg => sub { state $pg = Mojo::Pg->new('postgresql://chat_user@/sketchat') };
 
+get '/room' => sub {
+    my $c = shift;
+    $c->render( template => 'create_room' );
+};
+
 get '/room/:roomid' => sub {
     my $c = shift;
     $c->session('roomid', $c->param('roomid'));
@@ -18,16 +23,30 @@ websocket '/channel' => sub ($c) {
     $c->on(message => sub ($c, $message) {
 	       $c->app->log->info($message);
 	       $c->app->log->info($c->session('roomid'));
-	       $c->pg->pubsub->notify(mojochat => $message);
+
+	       my $channel = 'mojochat::' . $c->session('roomid');
+	       
+	       $c->pg->pubsub->notify($channel => $message);
 	   });
     
     # Forward messages from PostgreSQL to the browser
-    my $cb = sub ($pubsub, $message) { $c->send($message) };
-    $c->pg->pubsub->listen(mojochat => $cb);
+    my $cb = sub ($pubsub, $message) {
+	$c->app->log->info($c->session('roomid'));
+	$c->send($message)
+    };
+
+
+    $c->app->log->info($c->session('roomid'));
+    my $channel = 'mojochat::' . $c->session('roomid');
+    $c->pg->pubsub->listen($channel => $cb);
     
     # Remove callback from PG listeners on close
     $c->on(finish => sub ($c, @) {
-	       $c->pg->pubsub->unlisten(mojochat => $cb);
+	       $c->app->log->info($c->session('roomid'));
+
+	       my $channel = 'mojochat::' . $c->session('roomid');
+
+	       $c->pg->pubsub->unlisten($channel => $cb);
 	   });
 };
 
@@ -86,3 +105,13 @@ var vm = new Vue({
 });
 // reveal end app
 </script>
+@@ create_room.html.ep
+<script
+  src="https://code.jquery.com/jquery-3.4.1.min.js"
+  integrity="sha256-CSXorXvZcTkaix6Yvo6HppcZGetbYMGWSFlBw8HfCJo="
+  crossorigin="anonymous"></script>
+<a id ="createRoom" href="#">create a new room</a>
+<script>
+$(function(){
+
+})
