@@ -3,24 +3,32 @@ use Mojo::Pg;
 
 helper pg => sub { state $pg = Mojo::Pg->new('postgresql://chat_user@/sketchat') };
 
-get '/' => 'chat';
+get '/room/:roomid' => sub {
+    my $c = shift;
+    $c->session('roomid', $c->param('roomid'));
+    $c->render( template => 'chat' );
+};
+
 
 websocket '/channel' => sub ($c) {
-  $c->inactivity_timeout(3600);
+    $c->inactivity_timeout(3600);
 
-  # Forward messages from the browser to PostgreSQL
-  $c->on(message => sub ($c, $message) {
-    $c->pg->pubsub->notify(mojochat => $message);
-  });
-
-  # Forward messages from PostgreSQL to the browser
-  my $cb = sub ($pubsub, $message) { $c->send($message) };
-  $c->pg->pubsub->listen(mojochat => $cb);
-
-  # Remove callback from PG listeners on close
-  $c->on(finish => sub ($c, @) {
-    $c->pg->pubsub->unlisten(mojochat => $cb);
-  });
+    
+    # Forward messages from the browser to PostgreSQL
+    $c->on(message => sub ($c, $message) {
+	       $c->app->log->info($message);
+	       $c->app->log->info($c->session('roomid'));
+	       $c->pg->pubsub->notify(mojochat => $message);
+	   });
+    
+    # Forward messages from PostgreSQL to the browser
+    my $cb = sub ($pubsub, $message) { $c->send($message) };
+    $c->pg->pubsub->listen(mojochat => $cb);
+    
+    # Remove callback from PG listeners on close
+    $c->on(finish => sub ($c, @) {
+	       $c->pg->pubsub->unlisten(mojochat => $cb);
+	   });
 };
 
 app->start;
