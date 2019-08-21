@@ -4,24 +4,56 @@ window.onload = function() {
     paper.setup('canvas');
 
     var path;
+    var commands = [];
+    
     var tool = new Tool();
 
+    // ----------------------------------------
+    // this is where most everything happens
+    // ----------------------------------------
+    
+    var processMessage = function(message) {
+	commands.push(message);
+	var d = JSON.parse(message);
+	if (d.paperCommand) {
+	    try {
+		eval('paper.' + d.paperCommand);
+	    } catch(e) {
+		console.log(e);
+	    }
+	} else {
+	    try {
+		var path = Item.importJSON(message);
+		path.addTo(paper.project);
+	    } catch (e) {
+		console.log(e);
+	    }
+	}
+    }
+    // ----------------------------------------
+    // end of where most everything happens
+    // ----------------------------------------
+    
     $.get('<%= url_for('messages')->to_abs %>', d => {
-	console.log(d);
 	d.forEach(p => {
-	    var path = Item.importJSON(p.event);
-	    path.addTo(paper.project);
+	    processMessage(p.event)
 	})
     })
     
     var messages = [];
     var ws = new WebSocket('<%= url_for('channel')->to_abs %>');
-
+    var force;
+    
+    Pressure.set('#canvas', {
+	change: function(f, event){
+	    // console.log(force);
+	    force = f;
+	}
+    });
+    
     ws.onmessage = function (e) {
 	console.log('e', e);
-	var d = JSON.parse(e.data)
-	var path = Item.importJSON(e.data);
-	path.addTo(paper.project);
+	processMessage(e.data) 
     };
 
 
@@ -39,7 +71,8 @@ window.onload = function() {
 	path = new Path({
             segments: [event.point],
             strokeColor: 'black',
-            fullySelected: false
+            fullySelected: false,
+	    strokeWidth: 8
 	});
 	
     }
@@ -66,4 +99,9 @@ window.onload = function() {
 	ws.send(JSON.stringify(path.toJSON()))
     }
 
+    $('#clear').on('click', e => {
+	console.log(e);
+	paper.project.clear()
+	ws.send(JSON.stringify({ paperCommand: 'project.clear()' }))
+    })
 }
