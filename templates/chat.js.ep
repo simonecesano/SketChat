@@ -1,7 +1,21 @@
 paper.install(window);
 
+function createUUIDv4() {
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+	var r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
+	return v.toString(16);
+    });
+}
+
 window.onload = function() {
     paper.setup('canvas');
+
+    var eraseCircle;
+
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+
+    // ctx.filter = 'blur(4px)';
 
     var path;
     var commands = [];
@@ -12,21 +26,34 @@ window.onload = function() {
     // this is where most everything happens
     // ----------------------------------------
     
-    var processMessage = function(message) {
+    var processMessage = function(message, replaceAll) {
 	commands.push(message);
+	var signature = Cookies.get('signature');
+	
 	var d = JSON.parse(message);
-	if (d.paperCommand) {
-	    try {
-		eval('paper.' + d.paperCommand);
-	    } catch(e) {
-		console.log(e);
-	    }
-	} else {
-	    try {
-		var path = Item.importJSON(message);
-		path.addTo(paper.project);
-	    } catch (e) {
-		console.log(e);
+
+	if ((signature !== d.signature) || replaceAll) {
+	    if (d.paperCommand) {
+		try {
+		    eval('paper.' + d.paperCommand);
+		} catch(e) {
+		    console.log('command ' + d.paperCommand + ' failed');
+		}
+	    } else if (d.paperItem) {
+		var itemData = JSON.stringify(d.paperItem)
+		try {
+		    var path = Item.importJSON(itemData);
+		    path.addTo(paper.project);
+		} catch (e) {
+		    console.log(e);
+		}
+	    } else {
+		try {
+		    var path = Item.importJSON(message);
+		    path.addTo(paper.project);
+		} catch (e) {
+		    console.log(e);
+		}
 	    }
 	}
     }
@@ -36,72 +63,178 @@ window.onload = function() {
     
     $.get('<%= url_for('messages')->to_abs %>', d => {
 	d.forEach(p => {
-	    processMessage(p.event)
+	    processMessage(p.event, true)
 	})
     })
     
     var messages = [];
     var ws = new WebSocket('<%= url_for('channel')->to_abs %>');
-    var force;
-    
-    Pressure.set('#canvas', {
-	change: function(f, event){
-	    // console.log(force);
-	    force = f;
-	}
-    });
-    
-    ws.onmessage = function (e) {
+    var wsOnMessage = function (e) {
 	console.log('e', e);
 	processMessage(e.data) 
     };
+    ws.onmessage = wsOnMessage;
 
-
-    var textItem = new PointText({
-	content: 'Click and drag to draw a line.',
-	point: new Point(20, 30),
-	fillColor: 'black',
+    var force;
+    
+    Pressure.set('#canvas', {
+	change: function(f, event){ force = f }
     });
+    
 
-    tool.onMouseDown = function(event) {
-	if (path) {
-	    path.selected = false;
+    tool.minDistance = 10;
+    tool.maxDistance = 45;
+
+    var speed = 0;
+    var lastMouseTime = (new Date()).getTime();
+    window.setInterval(function(){
+	
+    }, 100);
+
+    var brush = {
+	onMouseDown: function(event) {
+	    if (path) { path.selected = false }
+
+	    path = new Path()
+	    path.strokeColor = '#444444ff';
+	    path.fillColor   = '#222222aa';
+	    path.add(event.point);
+	    path.name = createUUIDv4();
+	},
+
+	onMouseDrag: function(event) {
+	    // -----------------------------------------------
+	    // force should be [a basis] + [a factor] * force
+	    // -----------------------------------------------
+
+	    var step = event.delta.normalize().multiply(force * 10);
+	    step.angle += 90;
+
+	    // -----------------------------------------------
+	    // NB: using + and - directly doesn't
+	    // seem to work in plain Javascript
+	    // -----------------------------------------------
+
+	    var top =    event.middlePoint.add(step);
+	    var bottom = event.middlePoint.subtract(step);
+	    
+	    path.add(top.round());
+	    path.insert(0, bottom.round());
+
+	    path.smooth();
+	    
+	},
+	onMouseUp: function(event) {
+	    path.add(event.point);
+	    path.closed = true;
+	    path.smooth();
+	    sendstuff(path);
 	}
+    };
 
-	path = new Path({
-            segments: [event.point],
-            strokeColor: 'black',
-            fullySelected: false,
-	    strokeWidth: 8
-	});
-	
-    }
 
-    tool.onMouseDrag = function(event) {
-	path.add(event.point);
-    }
+    var changedItems = {};
+    
+    var eraser = {
+	onMouseDown: function(event) {
+	    if (path) { path.selected = false }
+	    eraseCircle = new Path.Circle(event.point, 12)
+	    eraseCircle.fillColor = "#ffffff88";
+	    eraseCircle.name = "eraser";
+	    changedItems = {};
+	},
 
-    tool.onMouseUp = function(event) {
-	var segmentCount = path.segments.length;
+	// ---------------------------------------------------------
+	// 1. keep track of changed (added, removed) items
+	// 2. for every added item, send a creation command
+	// 3. for every deleted command, send a delete command
+	// ---------------------------------------------------------
+	// How would it work if it sent the path of the eraser?
+	// ---------------------------------------------------------
 	
-	path.simplify(10);
-	path.fullySelected = false;
-	
-	var newSegmentCount = path.segments.length;
-	var difference = segmentCount - newSegmentCount;
-	var percentage = 100 - Math.round(newSegmentCount / segmentCount * 100);
-	
-	sendstuff(path);
-    }
+	onMouseDrag: function(event) {
+	    eraseCircle.position = event.point
+	    var intersects = project.getItems( { recursive: true, overlapping: eraseCircle.bounds })
+		.filter(item => { return item.id !== eraseCircle.id && item.className !== "Layer" })
+	    ;
 
+	    intersects.forEach(i => {
+		if (i.intersects(eraseCircle) || i.isInside(eraseCircle)) {
+		    var uuid = createUUIDv4()
+
+		    var erased = i.subtract(eraseCircle, { insert: true })
+		    erased.name = uuid;
+		    
+		    changedItems[uuid] = 'added';
+		    changedItems[i.name] = 'removed';
+		    i.remove();
+		} else if (false) {
+
+		}
+	    })
+	},
+	onMouseUp: function(event) {
+	    project.getItems({ recursive: true }).forEach(i => {
+		var bounds = i.bounds
+		if (bounds.width * bounds.height < 1) {
+		    // changedItems[i.name] = 'removed'
+		    i.remove()
+		}
+	    })
+	    eraseCircle.remove()
+	    if (true) {
+		console.log(changedItems);
+		for (var uuid in changedItems) {
+		    if (project.getItems({ name: uuid }).length) {
+			ws.send(JSON.stringify({ paperItem: project.getItem({ name: uuid}).toJSON() }));
+		    } else {
+			ws.send(JSON.stringify({ paperCommand: 'project.getItem({ name: "' + uuid + '"}).remove()' }))
+		    }
+		}
+		changedItems = {};
+	    }
+	}
+    };
+
+    
+    tool.onMouseDown = brush.onMouseDown;
+    tool.onMouseDrag = brush.onMouseDrag;
+    tool.onMouseUp   = brush.onMouseUp;
 
     function sendstuff(path) {
-	ws.send(JSON.stringify(path.toJSON()))
-    }
+	if (ws.readyState > 1) {
+	    ws = new WebSocket('<%= url_for('channel')->to_abs %>')
+	    ws.onmessage = wsOnMessage
+	}
+	ws.send(JSON.stringify({ paperItem: path.toJSON() }))
+    };
 
     $('#clear').on('click', e => {
 	console.log(e);
 	paper.project.clear()
 	ws.send(JSON.stringify({ paperCommand: 'project.clear()' }))
     })
+
+    $('#eraser').on('click', e => {
+	tool.minDistance = 1;
+
+	tool.onMouseDown = eraser.onMouseDown;
+	tool.onMouseDrag = eraser.onMouseDrag;
+	tool.onMouseUp   = eraser.onMouseUp;
+    })    
+
+    $('#inkpen').on('click', e => {
+	tool.minDistance = 10;
+	
+	tool.onMouseDown = brush.onMouseDown;
+	tool.onMouseDrag = brush.onMouseDrag;
+	tool.onMouseUp   = brush.onMouseUp;
+    })
+    
+    $('#new').on('click', e => {
+	var uuid4 = createUUIDv4 ();
+	console.log(uuid4);
+	window.location = '<%= url_for('canvas/')->to_abs %>' + uuid4;
+    })    
 }
+		    	      
