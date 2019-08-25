@@ -1,10 +1,38 @@
 % layout 'default';
 <script src="https://cdnjs.cloudflare.com/ajax/libs/paper.js/0.12.2/paper-full.min.js"></script>
-<script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pressure/2.1.2/pressure.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/js-cookie@2/src/js.cookie.min.js"></script>
+<script type="module">
 %= include 'chat', format => 'js';
 </script>
-</head>
-<body>
+<div class="row">
   <canvas style="margin:0;padding:0;background-color:#dddddd;width:100%;height:80%" id="canvas" resize></canvas>
-</body>
-</html>
+</div>
+<div class="row">
+  <a id="clear" href="#clear">clear canvas</a>&nbsp;|&nbsp;
+  <a id="undo" href="#undo">undo</a>&nbsp;|&nbsp;
+  <a id="redo" href="#redo">redo</a>&nbsp;|&nbsp;
+  <a id="movie" href="#movie">movie</a>
+</div>
+<div class="row">
+  <a id="sketch" href="#sketch">sketch</a>&nbsp;|&nbsp;
+  <a id="line" href="#line">segment</a>&nbsp;|&nbsp;
+  <a id="edit" href="#edit">vector edit</a>
+</div>
+<div class="row">
+  <a id="eraser" href="#eraser">eraser</a>&nbsp;|&nbsp;
+  <a id="pencil" href="#pencil">pencil</a>&nbsp;|&nbsp;
+  <a id="sharpie" href="#sharpie">sharpie</a>&nbsp;|&nbsp;
+  <a id="inkpen" href="#inkpen">ink pen</a>&nbsp;|&nbsp;
+  <a id="changeParameters" href="#changeParameters">change pen parameters</a>
+</div>
+<div class="row">
+  <a id="new" href="#new">new canvas</a>&nbsp;|&nbsp;
+  <a id="load" href="#load">load from clipboard</a>&nbsp;|&nbsp;
+  <a id="invite" href="mailto:">send an invite</a>&nbsp;|&nbsp;
+  <a id="saveSVG" href="#saveSVG">save as vector</a>&nbsp;|&nbsp;
+  <a id="savePNG" href="#savePNG">save as raster</a>
+</div>
+<div class="row">
+  <a id="help" href="<%= url_for('/help') %>">help</a>
+</div>
