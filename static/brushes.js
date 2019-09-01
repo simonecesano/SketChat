@@ -5,6 +5,65 @@ function createUUIDv4() {
     });
 }
 
+class SketChat {
+    constructor(channelUrl, paper, options) {
+	var sketChat = this;
+	var signature = Cookies.get('signature');
+
+	this.processMessage = function(message, replaceAll) {
+	    var d = JSON.parse(message);
+	    console.log(d);
+	    if ((signature !== d.signature) || replaceAll) {
+		if (d.paperCommand) {
+		    try {
+			console.log('paper.' + d.paperCommand);
+			eval('paper.' + d.paperCommand);
+			return true;
+		    } catch(e) {
+			console.log('command ' + d.paperCommand + ' failed');
+			console.log(e);
+			return false
+		    }
+		} else if (d.paperItem) {
+		    var itemData = JSON.stringify(d.paperItem)
+		    try {
+			var path = Item.importJSON(itemData);
+			path.addTo(paper.project);
+			return path;
+		    } catch (e) {
+			console.log(e);
+			return false
+		    }
+		} else if (d.alive) {
+		} else {
+		    try {
+			var path = Item.importJSON(message);
+			path.addTo(paper.project);
+			return path;
+		    } catch (e) {
+			console.log(e);
+			return false
+		    }
+		}
+	    }
+	}
+
+	var ws = new WebSocket(channelUrl);
+	ws.onmessage = function (e) {
+	    sketChat.processMessage(e.data) 
+	};
+	this.socket = ws;
+	
+	window.setInterval(function(){
+	    try {
+		ws.send(JSON.stringify({ alive: signature, time: (new Date()).getTime() }))
+	    } catch(e) {
+		console.log(e);
+	    }
+	}, 15000);
+    }
+};
+
 
 class Brush {
     constructor(project, socket, options) {
@@ -97,38 +156,57 @@ class InkBrush extends Brush {
 	    app.path.add(event.point);
 	    app.path.closed = true;
 	    app.path.smooth();
-	    // sendstuff(path);
 	    app.socket.send(JSON.stringify({ paperItem: app.path.toJSON() }))
 	}
     }
 }
 
-class Sharpie extends InkBrush {
+class Sharpie extends Brush {
+
+    get onMouseDown() {
+	var app = this;
+	
+	return function(event){
+	    if (app.path) { app.path.selected = false }
+
+	    app.path = new Path()
+	    app.path.strokeColor = 'black';
+	    app.path.strokeWidth = 10;
+	    app.path.add(event.point);
+	    app.path.name = createUUIDv4();
+	    app.path.addTo(app.project);	
+	};
+    }
+    
     get onMouseDrag() {
 	var app = this;
-
 	return function(event){
-	    // -----------------------------------------------
-	    // force should be [a basis] + [a factor] * force
-	    // -----------------------------------------------
-
-	    var step = event.delta.normalize().multiply(8);
-	    step.angle += 90;
-
-	    // -----------------------------------------------
-	    // NB: using + and - directly doesn't
-	    // seem to work in plain Javascript
-	    // -----------------------------------------------
-
-	    var top =    event.middlePoint.add(step);
-	    var bottom = event.middlePoint.subtract(step);
-	    
-	    app.path.add(top.round());
-	    app.path.insert(0, bottom.round());
-
-	    app.path.smooth();
+	    app.path.add(event.point);
 	}
-    }
+    };
+	
+    get onMouseUp() {
+	var app = this;
+	return function(event){
+	    app.path.simplify();
+	    var outerPath = OffsetUtils.offsetPath(app.path, 4);
+
+	    
+	    var innerPath = OffsetUtils.offsetPath(app.path, -4);
+	    innerPath.strokeColor = 'black';
+	    outerPath.reverse();
+
+	    innerPath.join(outerPath);
+	    innerPath.closePath()
+	    innerPath.fillColor = "black";
+	    innerPath.insertBelow(app.path);
+
+	    app.path.remove();
+	    app.path = innerPath;
+	    app.path.name = createUUIDv4();
+	    app.socket.send(JSON.stringify({ paperItem: app.path.toJSON() }))
+	}
+    };
 }
 
 class Eraser extends Brush {
