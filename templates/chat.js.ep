@@ -62,7 +62,7 @@ window.onload = function() {
 
     $('#sharpie').on('click', e => {
 	tool.minDistance = 10;
-	var sharpie = new WrongSharpie(project, sketChat.socket);
+	var sharpie = new Sharpie(project, sketChat.socket);
 	
 	tool.onMouseDown = sharpie.onMouseDown;
 	tool.onMouseDrag = sharpie.onMouseDrag;
