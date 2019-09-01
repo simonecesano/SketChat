@@ -5,6 +5,7 @@ use Mojo::JSON qw/encode_json decode_json/;
 use Text::MultiMarkdown qw/markdown/;
 
 app->plugin('Config');
+push @{app->static->paths}, './static';
 
 helper pg => sub { state $pg = Mojo::Pg->new('postgresql://chat_user@/sketchat') };
 
@@ -12,6 +13,11 @@ get '/js/*jspath' => sub {
     my $c = shift;
     my $template = $c->param('jspath') =~ s/\.js$//r;
     $c->render( template => $template, format => 'js' );
+};
+
+get '/static/*filepath' => sub {
+    my $c = shift;
+    $c->reply->static($c->param('filepath'));
 };
 
 get '/' => sub {
@@ -44,6 +50,28 @@ get '/messages' => sub {
 	$c->render( json => [] );
     }
 };
+
+get '/messages/:nr' => sub {
+    my $c = shift;
+    if ($c->session('roomid')) {
+	my $all = $c->pg->db->select('events', undef, { room_id => $c->session('roomid'), event_id => $c->param('nr') })->hash;
+	$c->render( json => $all );
+    } else {
+	$c->render( json => undef );
+    }
+};
+
+
+post '/messages/invalid' => sub {
+    my $c = shift;
+    if ($c->session('roomid') && $c->param('id')) {
+	$c->app->log->info($c->session('roomid'), $c->param('id'));
+	$c->pg->db->delete('events', { room_id => $c->session('roomid'), event_id => $c->param('id') });
+	$c->render(json => { status => 'ok' });
+    }
+};
+
+
 
 get '/login' => sub {
     my $c = shift;
@@ -95,23 +123,35 @@ get '/help' => sub {
 };
 
 websocket '/channel' => sub ($c) {
-    $c->inactivity_timeout(3600);
+
+    $c->inactivity_timeout(36000);
     
     # Forward messages from the browser to PostgreSQL
     $c->on(message => sub ($c, $message) {
 	       $c->app->log->info($message);
 	       # $c->app->log->info($c->session('roomid'));
-	       $message = decode_json($message);
 	       my $channel = 'mojochat::' . $c->session('roomid');
 	       $c->app->log->info('message length', length $message);
-	       $c->app->log->info('email', $c->session('email'));
-	       $message->{signature} = $c->session('signature');
-	       
-	       $message = encode_json($message);
-	       $c->app->log->info($message);
-	       
-	       $c->pg->db->insert('events', { event  => $message, room_id => $c->session('roomid'), user_id => $c->session('email'), event_time => time });
-	       $c->pg->pubsub->notify($channel => $message);
+	       $c->app->log->info('message', $message);
+	       $message = decode_json($message);
+
+	       if ($message->{alive}) {
+		   $message->{signature} = $c->session('signature');
+		   $message->{alive} = $c->session('email') || 'anonymous';
+		   $message = encode_json($message);
+		   $c->pg->pubsub->notify($channel => $message);
+	       } elsif (defined $message->{retrieve}) {
+		   
+	       } else {
+		   $c->app->log->info('email', $c->session('email'));
+		   
+		   $message->{signature} = $c->session('signature');
+		   $message = encode_json($message);
+
+		   $c->app->log->info('inserting');
+		   $c->pg->db->insert('events', { event  => $message, room_id => $c->session('roomid'), user_id => $c->session('email'), event_time => time });
+		   $c->pg->pubsub->notify($channel => $message);
+	       }
 	   });
     
     # Forward messages from PostgreSQL to the browser
