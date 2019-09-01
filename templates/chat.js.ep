@@ -10,213 +10,41 @@ function createUUIDv4() {
 window.onload = function() {
     paper.setup('canvas');
 
-    var eraseCircle;
-
-    const canvas = document.getElementById('canvas');
-    const ctx = canvas.getContext('2d');
-
-    // ctx.filter = 'blur(4px)';
-
-    var path;
-    var commands = [];
-    
+    var project = paper.project;
     var tool = new Tool();
-
-    // ----------------------------------------
-    // this is where most everything happens
-    // ----------------------------------------
-    
-    var processMessage = function(message, replaceAll) {
-	commands.push(message);
-	var signature = Cookies.get('signature');
-	
-	var d = JSON.parse(message);
-
-	if ((signature !== d.signature) || replaceAll) {
-	    if (d.paperCommand) {
-		try {
-		    eval('paper.' + d.paperCommand);
-		} catch(e) {
-		    console.log('command ' + d.paperCommand + ' failed');
-		}
-	    } else if (d.paperItem) {
-		var itemData = JSON.stringify(d.paperItem)
-		try {
-		    var path = Item.importJSON(itemData);
-		    path.addTo(paper.project);
-		} catch (e) {
-		    console.log(e);
-		}
-	    } else {
-		try {
-		    var path = Item.importJSON(message);
-		    path.addTo(paper.project);
-		} catch (e) {
-		    console.log(e);
-		}
-	    }
-	}
-    }
-    // ----------------------------------------
-    // end of where most everything happens
-    // ----------------------------------------
+    var sketChat = new SketChat('<%= url_for('channel')->to_abs %>', paper)
     
     $.get('<%= url_for('messages')->to_abs %>', d => {
 	d.forEach(p => {
-	    processMessage(p.event, true)
+	    if (!(sketChat.processMessage(p.event, true))) {
+		$.post('<%= url_for('/messages/invalid')->to_abs %>',
+		       { id: p.event_id },
+		       d => { console.log(d) });
+	    }
 	})
     })
-    
-    var messages = [];
-    var ws = new WebSocket('<%= url_for('channel')->to_abs %>');
-    var wsOnMessage = function (e) {
-	console.log('e', e);
-	processMessage(e.data) 
-    };
-    ws.onmessage = wsOnMessage;
-
-    var force;
-    
-    Pressure.set('#canvas', {
-	change: function(f, event){ force = f }
-    });
     
 
     tool.minDistance = 10;
     tool.maxDistance = 45;
 
     var speed = 0;
-    var lastMouseTime = (new Date()).getTime();
-    window.setInterval(function(){
-	
-    }, 100);
 
-    var brush = {
-	onMouseDown: function(event) {
-	    if (path) { path.selected = false }
-
-	    path = new Path()
-	    path.strokeColor = '#444444ff';
-	    path.fillColor   = '#222222aa';
-	    path.add(event.point);
-	    path.name = createUUIDv4();
-	},
-
-	onMouseDrag: function(event) {
-	    // -----------------------------------------------
-	    // force should be [a basis] + [a factor] * force
-	    // -----------------------------------------------
-
-	    var step = event.delta.normalize().multiply(force * 10);
-	    step.angle += 90;
-
-	    // -----------------------------------------------
-	    // NB: using + and - directly doesn't
-	    // seem to work in plain Javascript
-	    // -----------------------------------------------
-
-	    var top =    event.middlePoint.add(step);
-	    var bottom = event.middlePoint.subtract(step);
-	    
-	    path.add(top.round());
-	    path.insert(0, bottom.round());
-
-	    path.smooth();
-	    
-	},
-	onMouseUp: function(event) {
-	    path.add(event.point);
-	    path.closed = true;
-	    path.smooth();
-	    sendstuff(path);
-	}
-    };
-
-
-    var changedItems = {};
-    
-    var eraser = {
-	onMouseDown: function(event) {
-	    if (path) { path.selected = false }
-	    eraseCircle = new Path.Circle(event.point, 12)
-	    eraseCircle.fillColor = "#ffffff88";
-	    eraseCircle.name = "eraser";
-	    changedItems = {};
-	},
-
-	// ---------------------------------------------------------
-	// 1. keep track of changed (added, removed) items
-	// 2. for every added item, send a creation command
-	// 3. for every deleted command, send a delete command
-	// ---------------------------------------------------------
-	// How would it work if it sent the path of the eraser?
-	// ---------------------------------------------------------
-	
-	onMouseDrag: function(event) {
-	    eraseCircle.position = event.point
-	    var intersects = project.getItems( { recursive: true, overlapping: eraseCircle.bounds })
-		.filter(item => { return item.id !== eraseCircle.id && item.className !== "Layer" })
-	    ;
-
-	    intersects.forEach(i => {
-		if (i.intersects(eraseCircle) || i.isInside(eraseCircle)) {
-		    var uuid = createUUIDv4()
-
-		    var erased = i.subtract(eraseCircle, { insert: true })
-		    erased.name = uuid;
-		    
-		    changedItems[uuid] = 'added';
-		    changedItems[i.name] = 'removed';
-		    i.remove();
-		} else if (false) {
-
-		}
-	    })
-	},
-	onMouseUp: function(event) {
-	    project.getItems({ recursive: true }).forEach(i => {
-		var bounds = i.bounds
-		if (bounds.width * bounds.height < 1) {
-		    // changedItems[i.name] = 'removed'
-		    i.remove()
-		}
-	    })
-	    eraseCircle.remove()
-	    if (true) {
-		console.log(changedItems);
-		for (var uuid in changedItems) {
-		    if (project.getItems({ name: uuid }).length) {
-			ws.send(JSON.stringify({ paperItem: project.getItem({ name: uuid}).toJSON() }));
-		    } else {
-			ws.send(JSON.stringify({ paperCommand: 'project.getItem({ name: "' + uuid + '"}).remove()' }))
-		    }
-		}
-		changedItems = {};
-	    }
-	}
-    };
-
+    var brush = new InkBrush(project, sketChat.socket);
     
     tool.onMouseDown = brush.onMouseDown;
     tool.onMouseDrag = brush.onMouseDrag;
     tool.onMouseUp   = brush.onMouseUp;
 
-    function sendstuff(path) {
-	if (ws.readyState > 1) {
-	    ws = new WebSocket('<%= url_for('channel')->to_abs %>')
-	    ws.onmessage = wsOnMessage
-	}
-	ws.send(JSON.stringify({ paperItem: path.toJSON() }))
-    };
-
     $('#clear').on('click', e => {
 	console.log(e);
 	paper.project.clear()
-	ws.send(JSON.stringify({ paperCommand: 'project.clear()' }))
+	sketChat.socket.send(JSON.stringify({ paperCommand: 'project.clear()' }))
     })
 
     $('#eraser').on('click', e => {
 	tool.minDistance = 1;
+	var eraser = new Eraser(project, sketChat.socket);
 
 	tool.onMouseDown = eraser.onMouseDown;
 	tool.onMouseDrag = eraser.onMouseDrag;
@@ -225,11 +53,22 @@ window.onload = function() {
 
     $('#inkpen').on('click', e => {
 	tool.minDistance = 10;
+	var brush = new InkBrush(project, sketChat.socket);
 	
 	tool.onMouseDown = brush.onMouseDown;
 	tool.onMouseDrag = brush.onMouseDrag;
 	tool.onMouseUp   = brush.onMouseUp;
     })
+
+    $('#sharpie').on('click', e => {
+	tool.minDistance = 10;
+	var sharpie = new WrongSharpie(project, sketChat.socket);
+	
+	tool.onMouseDown = sharpie.onMouseDown;
+	tool.onMouseDrag = sharpie.onMouseDrag;
+	tool.onMouseUp   = sharpie.onMouseUp;
+    })
+
     
     $('#new').on('click', e => {
 	var uuid4 = createUUIDv4 ();
